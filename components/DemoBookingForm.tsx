@@ -2,10 +2,7 @@
 
 import { FormEvent, useState } from 'react';
 
-type FormState = 'idle' | 'submitted';
-
-// TODO: Wire this form to a real lead-capture endpoint (e.g. FastAPI /demo-request or a form service).
-// The previous target https://api.nachinaxbot.tech/api/demo-request does not exist.
+type FormState = 'idle' | 'submitting' | 'submitted' | 'error';
 
 export default function DemoBookingForm() {
   const [formState, setFormState] = useState<FormState>('idle');
@@ -13,12 +10,33 @@ export default function DemoBookingForm() {
   const [email, setEmail] = useState('');
   const [company, setCompany] = useState('');
   const [message, setMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setFormState('submitting');
+    setErrorMessage('');
 
-    // Mock success until a backend endpoint is available.
-    setFormState('submitted');
+    try {
+      const response = await fetch('/api/demo-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, company, message }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(
+          typeof data.error === 'string' ? data.error : 'Could not send your request. Please try again.',
+        );
+      }
+
+      setFormState('submitted');
+    } catch (error) {
+      setFormState('error');
+      setErrorMessage(error instanceof Error ? error.message : 'Could not send your request. Please try again.');
+    }
   };
 
   if (formState === 'submitted') {
@@ -26,8 +44,7 @@ export default function DemoBookingForm() {
       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-stone-800">
         <p className="text-lg font-semibold text-stone-900">Thanks — we received your request.</p>
         <p className="mt-2 text-sm leading-7 text-stone-600">
-          This form is temporarily running in demo mode. We will follow up at{' '}
-          <span className="font-medium text-stone-900">{email}</span> once the consultation API is connected.
+          Our team will follow up at <span className="font-medium text-stone-900">{email}</span> shortly.
         </p>
       </div>
     );
@@ -42,7 +59,8 @@ export default function DemoBookingForm() {
             required
             value={name}
             onChange={(event) => setName(event.target.value)}
-            className="mt-1 w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-stone-900 outline-none focus:border-amber-400"
+            disabled={formState === 'submitting'}
+            className="mt-1 w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-stone-900 outline-none focus:border-amber-400 disabled:opacity-60"
             placeholder="Your name"
           />
         </label>
@@ -53,7 +71,8 @@ export default function DemoBookingForm() {
             type="email"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            className="mt-1 w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-stone-900 outline-none focus:border-amber-400"
+            disabled={formState === 'submitting'}
+            className="mt-1 w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-stone-900 outline-none focus:border-amber-400 disabled:opacity-60"
             placeholder="you@company.com"
           />
         </label>
@@ -64,7 +83,8 @@ export default function DemoBookingForm() {
         <input
           value={company}
           onChange={(event) => setCompany(event.target.value)}
-          className="mt-1 w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-stone-900 outline-none focus:border-amber-400"
+          disabled={formState === 'submitting'}
+          className="mt-1 w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-stone-900 outline-none focus:border-amber-400 disabled:opacity-60"
           placeholder="Business name"
         />
       </label>
@@ -75,21 +95,23 @@ export default function DemoBookingForm() {
           required
           value={message}
           onChange={(event) => setMessage(event.target.value)}
+          disabled={formState === 'submitting'}
           rows={4}
-          className="mt-1 w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-stone-900 outline-none focus:border-amber-400"
+          className="mt-1 w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-stone-900 outline-none focus:border-amber-400 disabled:opacity-60"
           placeholder="Tell us about your use case, channels, and timeline."
         />
       </label>
 
-      <p className="text-xs text-stone-500">
-        Demo mode: submissions are not sent to a server yet. TODO — connect to a real /demo-request endpoint.
-      </p>
+      {formState === 'error' && errorMessage ? (
+        <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{errorMessage}</p>
+      ) : null}
 
       <button
         type="submit"
-        className="rounded-full bg-amber-700 px-6 py-3 text-sm font-semibold text-white transition hover:bg-amber-800"
+        disabled={formState === 'submitting'}
+        className="rounded-full bg-amber-700 px-6 py-3 text-sm font-semibold text-white transition hover:bg-amber-800 disabled:cursor-not-allowed disabled:opacity-60"
       >
-        Request AI Automation Consultation
+        {formState === 'submitting' ? 'Sending...' : 'Request AI Automation Consultation'}
       </button>
     </form>
   );

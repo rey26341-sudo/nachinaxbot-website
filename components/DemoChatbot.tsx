@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 type Message = {
   role: 'assistant' | 'user';
@@ -47,17 +47,36 @@ const profileLabels: Record<string, string> = {
 };
 
 const DEFAULT_ENDPOINT = 'https://yellamma-db.onrender.com/chat';
+const CHAT_TIMEOUT_MS = 90_000;
 
 export default function DemoChatbot() {
   const [messages, setMessages] = useState<Message[]>(starterMessages);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingHint, setLoadingHint] = useState('');
   const [businessId, setBusinessId] = useState('medical_clinic');
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const endpoint = useMemo(() => {
     return process.env.NEXT_PUBLIC_FASTAPI_URL ?? DEFAULT_ENDPOINT;
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (loadingTimerRef.current) {
+        clearTimeout(loadingTimerRef.current);
+      }
+    };
+  }, []);
+
+  const clearLoadingHintTimer = () => {
+    if (loadingTimerRef.current) {
+      clearTimeout(loadingTimerRef.current);
+      loadingTimerRef.current = null;
+    }
+    setLoadingHint('');
+  };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -71,6 +90,14 @@ export default function DemoChatbot() {
     setMessages((current) => [...current, userMessage]);
     setInput('');
     setIsLoading(true);
+    setLoadingHint('');
+
+    loadingTimerRef.current = setTimeout(() => {
+      setLoadingHint('Waking up the AI server — first reply can take up to a minute on the free hosting tier.');
+    }, 5000);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), CHAT_TIMEOUT_MS);
 
     try {
       const response = await fetch(endpoint, {
@@ -83,6 +110,7 @@ export default function DemoChatbot() {
           message: trimmed,
           session_id: sessionId,
         }),
+        signal: controller.signal,
       });
 
       if (!response.ok) {
@@ -101,11 +129,13 @@ export default function DemoChatbot() {
           : 'I can help with booking, pricing, and appointment follow-ups.';
 
       setMessages((current) => [...current, { role: 'assistant', content: assistantReply }]);
-    } catch {
-      const fallbackReply =
-        'The chat backend is not reachable right now. Confirm NEXT_PUBLIC_FASTAPI_URL is set to ' +
-        endpoint +
-        ' and that CORS allows this site.';
+    } catch (error) {
+      const isTimeout = error instanceof Error && error.name === 'AbortError';
+      const fallbackReply = isTimeout
+        ? 'The AI server took too long to respond (common after idle time on free hosting). Please wait a moment and try again.'
+        : 'The chat backend is not reachable right now. Confirm NEXT_PUBLIC_FASTAPI_URL is set to ' +
+          endpoint +
+          ' and that CORS allows this site.';
 
       setMessages((current) => [
         ...current,
@@ -115,6 +145,8 @@ export default function DemoChatbot() {
         },
       ]);
     } finally {
+      clearTimeout(timeoutId);
+      clearLoadingHintTimer();
       setIsLoading(false);
     }
   };
@@ -175,7 +207,8 @@ export default function DemoChatbot() {
               setBusinessId(event.target.value);
               setSessionId(null);
             }}
-            className="flex-1 rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 outline-none focus:border-amber-400"
+            disabled={isLoading}
+            className="flex-1 rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 outline-none focus:border-amber-400 disabled:opacity-60"
           >
             {businessProfiles.map((profile) => (
               <option key={profile} value={profile}>
@@ -198,6 +231,12 @@ export default function DemoChatbot() {
               {message.content}
             </div>
           ))}
+          {isLoading ? (
+            <div className="max-w-[86%] rounded-2xl bg-amber-100 px-4 py-3 text-sm text-amber-900">
+              <p className="animate-pulse">Thinking...</p>
+              {loadingHint ? <p className="mt-2 text-xs leading-5 text-amber-800">{loadingHint}</p> : null}
+            </div>
+          ) : null}
         </div>
 
         <div className="mt-4 flex flex-wrap gap-2">
@@ -206,7 +245,8 @@ export default function DemoChatbot() {
               key={prompt}
               type="button"
               onClick={() => setInput(prompt)}
-              className="rounded-full border border-stone-200 bg-white px-3 py-1 text-xs text-stone-600 transition hover:border-amber-300 hover:text-stone-900"
+              disabled={isLoading}
+              className="rounded-full border border-stone-200 bg-white px-3 py-1 text-xs text-stone-600 transition hover:border-amber-300 hover:text-stone-900 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {prompt}
             </button>
@@ -217,15 +257,16 @@ export default function DemoChatbot() {
           <input
             value={input}
             onChange={(event) => setInput(event.target.value)}
+            disabled={isLoading}
             placeholder="Ask about pricing, services, availability, or bookings..."
-            className="flex-1 rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-900 outline-none placeholder:text-stone-400 focus:border-amber-400"
+            className="flex-1 rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-900 outline-none placeholder:text-stone-400 focus:border-amber-400 disabled:opacity-60"
           />
           <button
             type="submit"
-            disabled={isLoading}
+            disabled={isLoading || !input.trim()}
             className="rounded-2xl bg-amber-700 px-4 py-3 text-sm font-semibold text-white transition hover:bg-amber-800 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {isLoading ? 'Thinking...' : 'Send'}
+            {isLoading ? 'Sending...' : 'Send'}
           </button>
         </form>
       </div>
