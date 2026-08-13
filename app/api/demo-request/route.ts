@@ -10,19 +10,85 @@ type DemoRequestBody = {
   message?: string;
 };
 
-export async function POST(request: Request) {
-  const apiKey = process.env.RESEND_API_KEY;
+async function sendViaResend(
+  apiKey: string,
+  toEmail: string,
+  fromEmail: string,
+  name: string,
+  email: string,
+  company: string,
+  message: string,
+) {
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: fromEmail,
+      to: [toEmail],
+      reply_to: email,
+      subject: `New AI consultation request from ${name}`,
+      text: formatEmailBody(name, email, company, message),
+    }),
+  });
 
-  if (!apiKey) {
-    return NextResponse.json(
-      {
-        error:
-          'Email delivery is not configured. Add RESEND_API_KEY to your Vercel environment variables.',
-      },
-      { status: 503 },
-    );
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Resend error: ${detail}`);
+  }
+}
+
+async function sendViaFormSubmit(
+  toEmail: string,
+  name: string,
+  email: string,
+  company: string,
+  message: string,
+) {
+  const response = await fetch(`https://formsubmit.co/ajax/${encodeURIComponent(toEmail)}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({
+      name,
+      email,
+      company,
+      message,
+      _subject: `New AI consultation request from ${name}`,
+      _template: 'table',
+      _captcha: 'false',
+    }),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`FormSubmit error: ${detail}`);
   }
 
+  const data = await response.json().catch(() => ({}));
+  if (data.success !== 'true' && data.success !== true) {
+    throw new Error('FormSubmit did not confirm delivery.');
+  }
+}
+
+function formatEmailBody(name: string, email: string, company: string, message: string) {
+  return [
+    'New consultation request from nachinaxbot.tech',
+    '',
+    `Name: ${name}`,
+    `Email: ${email}`,
+    `Company: ${company}`,
+    '',
+    'Message:',
+    message,
+  ].join('\n');
+}
+
+export async function POST(request: Request) {
   let body: DemoRequestBody;
 
   try {
@@ -41,37 +107,22 @@ export async function POST(request: Request) {
   }
 
   const toEmail = process.env.DEMO_REQUEST_TO_EMAIL ?? DEFAULT_TO_EMAIL;
+  const resendKey = process.env.RESEND_API_KEY;
   const fromEmail = process.env.DEMO_REQUEST_FROM_EMAIL ?? DEFAULT_FROM_EMAIL;
 
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from: fromEmail,
-      to: [toEmail],
-      reply_to: email,
-      subject: `New AI consultation request from ${name}`,
-      text: [
-        'New consultation request from nachinaxbot.tech',
-        '',
-        `Name: ${name}`,
-        `Email: ${email}`,
-        `Company: ${company}`,
-        '',
-        'Message:',
-        message,
-      ].join('\n'),
-    }),
-  });
+  try {
+    if (resendKey) {
+      await sendViaResend(resendKey, toEmail, fromEmail, name, email, company, message);
+    } else {
+      await sendViaFormSubmit(toEmail, name, email, company, message);
+    }
 
-  if (!response.ok) {
-    const detail = await response.text();
-    console.error('Resend API error:', detail);
-    return NextResponse.json({ error: 'Failed to send email. Please try again later.' }, { status: 502 });
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error('Demo request email failed:', error);
+    return NextResponse.json(
+      { error: 'Failed to send your request. Please try again or email us directly.' },
+      { status: 502 },
+    );
   }
-
-  return NextResponse.json({ ok: true });
 }
